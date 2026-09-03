@@ -15,7 +15,7 @@
         "name": "NILE"
       },
       "homepage": "https://nile.app",
-      "license": "UNLICENSED",
+      "license": "MIT",
       "category": "web",
       "keywords": [
         "webmcp",

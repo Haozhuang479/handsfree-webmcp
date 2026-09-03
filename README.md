@@ -66,3 +66,7 @@ plugins/handsfree/
 ## Status
 
 WebMCP is a W3C Web Machine Learning Community Group draft (Chrome 146+ behind a flag, 149+ origin trial as of Sept 2026). The runtime forwards to a native `document.modelContext` when one exists and works without it. See `CHANGELOG.md`.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

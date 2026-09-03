@@ -102,6 +102,10 @@ reviewing the generated tools, sites where the primary actions had no API and
 were skipped).
 
 ## Runtime behaviour reference
+- **Voice language:** `lang` defaults to the browser language (zh → zh-CN);
+  Chinese commands and common product words are mapped to the English intents
+  before routing. `Handsfree.voice.feed("…")` runs the full voice path without a
+  microphone; the dock shows a mic level bar while listening.
 - **Voice grammar (built-in):** scroll down/up · top/bottom · back/forward · close ·
   next/previous · open (it / number N / the third one) · buy it (confirm) ·
   more / load more · cheaper / pricier (→ `refine_results` if the page has it) ·
@@ -112,8 +116,8 @@ were skipped).
   `min_price` and are removed from the query text. Anything else → text-sink.
   Spoken feedback is off by default (`speak: true` to enable).
 - **Gestures:** the index fingertip is a cursor projected on the page (grey
-  ring); whatever it points at gets `.hf-hover`. An **index-finger tap** (the
-  finger, held out alone, bends and straightens within `tapMaxMs`) clicks it —
+  ring); whatever it points at gets `.hf-hover`. A **fist** (all fingers folded for
+  `fistFrames` detections; open the hand again before the next click) clicks it —
   a product card is focused through the page's focus tool and opened with its
   open tool, any other link/button gets a real `click()`. The outer left and
   right bands of the viewport (`zoneWidth`, 18 %) are **scroll zones**: the
@@ -123,7 +127,8 @@ were skipped).
   drawn on a full-screen dot field (fine grey grid that bulges under the
   cursor; the side bands are teal-tinted while a hand is tracked and glow when
   active) with a bold white/ink cursor ring and a thin ring on click (no trailing
-  particles). Tuning: `tapBend`, `tapRelease`, `tapMaxMs`. Tuning: `zoneWidth`, `zoneDeadband`,
+  particles). Tuning: `fistFrames`, `fistOpenFrames`, `clickCooldownMs`; performance:
+  `detectEvery`, `maxDpr`, `dotSpacing`. Tuning: `zoneWidth`, `zoneDeadband`,
   `maxScrollSpeed`, `clickCooldownMs`, `cursorSmoothing`,
   `region` (the lower-left / lower-right part of the camera frame — picked by
   where the hand is, with hysteresis — maps to the whole viewport, so the arm
@@ -151,6 +156,9 @@ were skipped).
   cursor act like a finger (the demo's scratch-to-win card is scratched by
   passing the cursor over it).
 - **Events:** `handsfree:routed` `{text, result}`, `handsfree:gesture` `{gesture}`,
+  `handsfree:transcript` `{text, final, source}`, `handsfree:voice` `{state, detail}`
+  (listening / audio / speech / error / ended — surface these in a debug panel to
+  verify the microphone path),
   `handsfree:cursor` `{x, y, mode}` (≈30 Hz while a hand is tracked), `handsfree:handlost`.
   Pages can drive hover behaviours from the cursor event (the demo scrolls its
   product rails: left half → left, right half → right). Mark horizontal

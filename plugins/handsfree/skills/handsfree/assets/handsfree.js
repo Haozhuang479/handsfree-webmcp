@@ -1,4 +1,4 @@
-/*! handsfree.js v0.5.2 — voice + gesture input layer for WebMCP-instrumented pages.
+/*! handsfree.js v0.6.3 — voice + gesture input layer for WebMCP-instrumented pages.
  *
  *  <script src="/handsfree.js" defer></script>            ← the one line
  *
@@ -9,8 +9,8 @@
  *   2. Voice: Web Speech API transcript → rule-based router → tool call.
  *   3. Gesture: MediaPipe HandLandmarker (CDN, on-device). The index finger is
  *      a cursor projected on the page; the outer left/right bands are scroll
- *      zones (upper half up, lower half down, faster towards the edges); an
- *      index-finger tap clicks what the cursor is over. Hands, zones and actions are drawn
+ *      zones (upper half up, lower half down, faster towards the edges); a
+ *      fist clicks what the cursor is over. Hands, zones and actions are drawn
  *      on a translucent grey particle overlay.
  *   4. A dock (hand / mic toggles, live transcript, feedback) styled after
  *      NILE's UI: ink pill, mint on-state, line icons, no shadows.
@@ -31,7 +31,7 @@
   const ds = script?.dataset || {};
   const bool = (v, d) => (v == null ? d : !(v === 'false' || v === '0' || v === 'off'));
   const CFG = Object.assign({
-    voice: true, gesture: true, speak: false, lang: 'en-US', wake: null, // speak: no spoken feedback by default
+    voice: true, gesture: true, speak: false, lang: null, wake: null, // lang: null = follow the browser (zh → zh-CN, else en-US); speak: no spoken feedback by default
     textTool: null, scrollTool: null, autostart: false, position: 'bottom-right',
     mediapipe: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14',
     model: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
@@ -45,7 +45,8 @@
     zoneColor: null,      // scroll-zone tint; defaults to the page's --mint (teal-green) or #00e0ac
     zoneDeadband: 0.08,   // no scrolling within ±8 % of the vertical centre of a zone
     maxScrollSpeed: 1500, // px/s at the very top/bottom of a zone
-    tapBend: 0.86, tapRelease: 0.9, tapMaxMs: 600, tapDrop: 0.12, clickCooldownMs: 380, // index-finger tap: the extension ratio dips below tapBend (or drops by tapDrop within ~150 ms) and recovers above tapRelease
+    fistFrames: 3, fistOpenFrames: 2, clickCooldownMs: 600, // fist = click: closed hand for fistFrames detections, then open again before the next click
+    detectEvery: 2, maxDpr: 1.5, // performance: run the hand model every other frame, cap overlay resolution
     waveDistance: 0.2, waveSpeed: 1.2, waveWindowMs: 300, waveCooldownMs: 900, // open-hand wave: right = back, left = forward
     accent: null,         // overlay colour; default is a translucent grey (see fx)
   }, window.HANDSFREE_CONFIG || {}, {
@@ -53,6 +54,7 @@
     ...(ds.speak != null && { speak: bool(ds.speak, true) }), ...(ds.lang && { lang: ds.lang }), ...(ds.wake && { wake: ds.wake }),
     ...(ds.textTool && { textTool: ds.textTool }), ...(ds.scrollTool && { scrollTool: ds.scrollTool }), ...(ds.autostart != null && { autostart: bool(ds.autostart, false) }),
   });
+  if (!CFG.lang) { const nl = (navigator.language || 'en-US'); CFG.lang = /^zh/i.test(nl) ? (/(tw|hk|hant)/i.test(nl) ? 'zh-TW' : 'zh-CN') : /^(ja|ko|fr|de|es|it|pt)/i.test(nl) ? nl : 'en-US'; }
   const cssVar = (name, fallback) => { try { const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); return v || fallback; } catch { return fallback; } };
   const ACCENT = () => CFG.accent || '#8b8b8a'; // translucent grey by default; a page may pass accent to recolour
   const ZONE = () => CFG.zoneColor || cssVar('--mint-deep', '') || cssVar('--mint', '#00e0ac');
@@ -114,7 +116,31 @@
     .replace(/\blanding[- ]page\b/g, 'landing page')
     .replace(/\b(\d+)\s*(?:dollars?|bucks?|usd)\b/g, '$$$1')
     .replace(/\bdlp\b/g, 'landing page for');
-  const norm = (s) => wordsToNumber(asrFix(s.toLowerCase().replace(/[.,!?;:]/g, ' ').replace(/\s+/g, ' ').trim()));
+  const ZH = [
+    [/^(?:请)?(?:向下|往下|下)(?:滚|滑|翻)(?:动|一点|一些)?$/, 'scroll down'], [/^(?:请)?(?:向上|往上|上)(?:滚|滑|翻)(?:动|一点|一些)?$/, 'scroll up'], [/^(?:回到)?(?:顶部|最上面)$/, 'top'], [/^(?:到)?(?:底部|最下面)$/, 'bottom'],
+    [/^(?:返回|后退|退出|回去|关闭|关掉)$/, 'back'], [/^(?:前进)$/, 'forward'], [/^(?:下一个|下一件|下一张)$/, 'next'], [/^(?:上一个|上一件|上一张)$/, 'previous'], [/^(?:第一个|第一件)$/, 'first'],
+    [/^(?:打开|看看|查看)(?:它|这个|这件|详情)?$/, 'open it'], [/^(?:购买|买|买它|买这个|结账|下单)$/, 'buy it'], [/^(?:是|是的|好|好的|确认|确定|可以)$/, 'yes'], [/^(?:不|不要|取消|算了|不用)$/, 'no'],
+    [/^(?:帮助|怎么用|能说什么)$/, 'help'], [/^(?:停|停止|暂停|别听了)$/, 'stop'], [/^(?:更多|加载更多|再来一些|下一页)$/, 'more'], [/^(?:首页|回首页|主页|回到首页)$/, 'go home'],
+    [/^(?:便宜(?:点|一点|的)?|再便宜点|太贵了)$/, 'cheaper'], [/^(?:贵(?:点|一点)|更好的|高端(?:点|一点)?)$/, 'pricier'], [/^(?:品牌|所有品牌|看品牌|品牌页)$/, 'brands'], [/^(?:全部|浏览全部|看全部|所有商品)$/, 'browse everything'], [/^(?:这是什么|介绍一下|描述一下)$/, 'what is this'],
+    [/^(?:试试运气|刮卡|抽奖|刮一刮)(?:[:：,，]?\s*(.+))?$/, (m) => 'try my luck' + (m[1] ? ' with ' + m[1] : '')],
+    [/^(?:落地页|着陆页|做个页面|生成页面|做一个页面)[:：,，]?\s*(.+)$/, (m) => 'landing page for ' + m[1]], [/^(?:最便宜的|便宜的)\s*(.+)$/, (m) => 'cheapest ' + m[1]], [/^(?:最贵的)\s*(.+)$/, (m) => 'most expensive ' + m[1]],
+    [/^(?:搜索|搜|找|查找|找一下|我想要|我想买|我要买|我需要|给我找|有没有|看看有没有)[:：,，]?\s*(.+)$/, (m) => 'find ' + m[1]],
+  ];
+  const ZHW = [['跑步鞋', 'running shoes'], ['跑鞋', 'running shoes'], ['运动鞋', 'sneakers'], ['鞋子', 'shoes'], ['鞋', 'shoes'], ['台灯', 'desk lamp'], ['灯具', 'lamp'], ['灯', 'lamp'], ['耳机', 'headphones'], ['耳塞', 'earbuds'], ['音箱', 'speaker'], ['充电器', 'charger'], ['手机壳', 'phone case'],
+    ['蜡烛', 'candle'], ['香薰', 'candle'], ['毯子', 'blanket'], ['抱枕', 'pillow'], ['枕头', 'pillow'], ['床单', 'sheets'], ['地毯', 'rug'], ['沙发', 'sofa'], ['椅子', 'chair'], ['桌子', 'desk'], ['家居', 'home'], ['装饰', 'decor'], ['收纳', 'storage'],
+    ['狗零食', 'dog treats'], ['狗粮', 'dog food'], ['狗玩具', 'dog toys'], ['牵引绳', 'dog leash'], ['狗', 'dog'], ['猫', 'cat'], ['宠物', 'pet'], ['礼物', 'gifts'], ['礼品', 'gifts'], ['护肤', 'skincare'], ['精华', 'serum'], ['面霜', 'moisturizer'], ['洗面奶', 'cleanser'], ['化妆', 'makeup'], ['口红', 'lipstick'], ['防晒', 'sunscreen'],
+    ['外套', 'jacket'], ['夹克', 'jacket'], ['大衣', 'coat'], ['卫衣', 'hoodie'], ['T恤', 't-shirt'], ['连衣裙', 'dress'], ['裙子', 'dress'], ['裤子', 'pants'], ['帽子', 'hat'], ['包包', 'bag'], ['背包', 'backpack'], ['钱包', 'wallet'], ['手表', 'watch'], ['太阳镜', 'sunglasses'], ['首饰', 'jewelry'], ['项链', 'necklace'], ['耳环', 'earrings'],
+    ['杯子', 'mug'], ['水杯', 'water bottle'], ['保温杯', 'tumbler'], ['咖啡', 'coffee'], ['茶', 'tea'], ['厨房', 'kitchen'], ['锅', 'pan'], ['刀', 'knife'], ['玩具', 'toys'], ['游戏', 'games'], ['键盘', 'keyboard'], ['鼠标', 'mouse'], ['露营', 'camping'], ['徒步', 'hiking'], ['户外', 'outdoor'], ['瑜伽', 'yoga'], ['健身', 'fitness'], ['维生素', 'vitamins'], ['保健品', 'supplements'], ['蛋白粉', 'protein powder'],
+    ['秋季', 'fall'], ['秋天', 'fall'], ['冬季', 'winter'], ['冬天', 'winter'], ['夏天', 'summer'], ['舒适', 'cozy'], ['温暖', 'warm'], ['简约', 'minimalist'], ['复古', 'vintage'], ['有机', 'organic'], ['天然', 'natural'], ['便宜', 'cheap'], ['高端', 'premium'],
+    ['妈妈', 'mom'], ['母亲', 'mom'], ['爸爸', 'dad'], ['父亲', 'dad'], ['男士', 'men'], ['男生', 'men'], ['女士', 'women'], ['女生', 'women'], ['儿童', 'kids'], ['小孩', 'kids'], ['宝宝', 'baby'], ['婴儿', 'baby'], ['朋友', 'friend'], ['新手', 'starter'], ['套装', 'kit'], ['的', ' '], ['和', ' and '], ['或', ' or '], ['给', ' for '], ['送', ' for '], ['以下', ' under '], ['以内', ' under '], ['美元', ' dollars'], ['块', ' dollars'], ['元', ' dollars']];
+  const zhWords = (t) => {
+    let x = t.replace(/(\d+)\s*(?:美元|美金|块钱|块|元|刀)?\s*(?:以内|以下|之内|内)/g, ' under $$$1 ').replace(/(\d+)\s*(?:美元|美金|块钱|块|元|刀)?\s*(?:以上|起)/g, ' over $$$1 ').replace(/(\d+)\s*(?:到|至|-)\s*(\d+)\s*(?:美元|美金|块|元)?/g, ' between $$$1 and $$$2 ');
+    for (const [zh, en] of ZHW) x = x.split(zh).join(' ' + en + ' ');
+    return x.replace(/[\u3400-\u9fff]+/g, ' ').replace(/\s+/g, ' ').trim();
+  };
+  const zhToIntent = (t) => { const x = t.replace(/[。！？、，,.!?]/g, '').trim(); for (const [re, to] of ZH) { const m = x.match(re); if (m) { const out = typeof to === 'function' ? to(m) : to; return hasCJK(out) ? zhWords(out) : out; } } return zhWords(x); };
+  const hasCJK = (t) => /[\u3400-\u9fff]/.test(t);
+  const norm = (s) => { let t = s.trim(); if (hasCJK(t)) t = zhToIntent(t); return wordsToNumber(asrFix(t.toLowerCase().replace(/[.,!?;:]/g, ' ').replace(/\s+/g, ' ').trim())); };
   const ordinal = (s) => { const m = s.match(/\b(?:number|no|the)?\s*(\d+|one|two|three|four|five|six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b/); return m ? (NUM[m[1]] || +m[1]) : undefined; };
   let pending = null;
   const viaTool = async (t, input, label) => { if (!t) return { error: `no tool for "${label}"` }; if (hf(t).confirm) return askConfirm(t.name, input, label); return exec(t.name, input); };
@@ -139,13 +165,18 @@
     { re: /^(?:no|nope|cancel|never mind|stop that)$/, run: () => confirmPending(false) },
     { re: /^(?:stop|pause|quiet|mute)(?: listening)?$/, run: () => (voice.stop(), { did: 'voice.stop' }) },
     { re: /^(?:help|what can i say|commands)$/, run: () => helpToast() },
+    { re: /^(?:switch to|speak|use) (chinese|mandarin|english|japanese|korean|french|german|spanish)$/, run: (m) => ({ did: 'setLang', lang: voice.setLang({ chinese: 'zh-CN', mandarin: 'zh-CN', english: 'en-US', japanese: 'ja-JP', korean: 'ko-KR', french: 'fr-FR', german: 'de-DE', spanish: 'es-ES' }[m[1]]) }) },
   ];
-  async function route(rawText) {
+  async function route(rawText, source = 'text') {
     let text = norm(rawText); if (!text) return null;
     if (CFG.wake) { const w = norm(CFG.wake); if (!text.startsWith(w)) return null; text = text.slice(w.length).trim(); }
-    const LEAD = /^(?:hey|hi|ok|okay|please|can you|could you|would you|will you|i want to|i'd like to|i would like to|let's|let us|now|um|uh|so|just)\s+/;
+    const LEAD = /^(?:hey|hi|ok|okay|please|can you|could you|would you|will you|i want to|i'd like to|i would like to|let's|let us|now|um|uh|so|just|i want you to|can i|could i|may i)\s+/;
     while (LEAD.test(text)) text = text.replace(LEAD, '');
-    text = text.replace(/\s+(?:please|thanks|thank you|for me)$/, '').trim();
+    text = text.replace(/\s+(?:please|thanks|thank you|for me|now)$/, '').trim();
+    // "go to the brands page", "open the brands", "take me to browse", "see the brands" → the tool words themselves
+    const NAV = /^(?:go to|go back to|take me to|bring me to|navigate to|open|open up|show|see|view|switch to|jump to)\s+(?:the\s+|my\s+)?(.+?)(?:\s+(?:page|section|tab|screen|view))?$/;
+    const navm = text.match(NAV);
+    if (navm && listTools().some((t) => [t.name.replace(/[_-]+/g, ' '), ...(hf(t).phrases || [])].some((ph) => norm(ph) === navm[1] || navm[1].startsWith(norm(ph) + ' ')))) text = navm[1];
     ui.transcript(text);
     for (const b of BUILTIN) { const m = text.match(b.re); if (m) return finish(await b.run(m), text); }
     const tools = listTools(); const cands = [];
@@ -164,7 +195,7 @@
     }
     const sink = textSink();
     if (!sink) return finish({ error: 'no text-sink tool registered' }, text);
-    return finish(await exec(sink.name, { [firstStringProp(sink)]: rawText.trim() }), text);
+    return finish(await exec(sink.name, { [firstStringProp(sink)]: hasCJK(rawText) ? text : rawText.trim() }), text);
   }
   function buildInput(t, rest, full) {
     const props = t.inputSchema?.properties || {}; const input = {};
@@ -174,6 +205,7 @@
     const tidy = rest.replace(/^(?:a|an|the|some|any)\s+/, '').replace(/\b(?:something|anything|some|stuff|things?)\b\s*/g, '').replace(/\s+/g, ' ').trim();
     if (props[sp] && !(sp in input) && tidy) input[sp] = tidy;
     for (const [k, v] of Object.entries(props)) if (v.enum && !(k in input)) { const hit = v.enum.find((e) => full.includes(String(e).toLowerCase())); if (hit) input[k] = hit; }
+    if (props.sort && !input.sort) { if (/\b(?:cheapest|lowest price|low to high|least expensive)\b/.test(full)) input.sort = 'price_asc'; else if (/\b(?:most expensive|priciest|highest price|high to low)\b/.test(full)) input.sort = 'price_desc'; if (input.sort && typeof input[sp] === 'string') input[sp] = input[sp].replace(/\b(?:cheapest|lowest price|low to high|least expensive|most expensive|priciest|highest price|high to low)\b/g, '').replace(/\s+/g, ' ').trim(); }
     const priceRe = /\b(?:under|below|less than|max(?:imum)?|up to|no more than|cheaper than)\s*\$?\s*(\d+(?:\.\d+)?)\b(?:\s*(?:dollars?|bucks?))?/;
     const minRe = /\b(?:over|above|more than|min(?:imum)?|at least)\s*\$?\s*(\d+(?:\.\d+)?)\b(?:\s*(?:dollars?|bucks?))?/;
     const betweenRe = /\bbetween\s*\$?(\d+)\s*(?:and|to|-)\s*\$?(\d+)\b/;
@@ -244,17 +276,38 @@
         if (Date.now() < muteUntil) return;
         let interim = '', final = '';
         for (let i = e.resultIndex; i < e.results.length; i++) { const r = e.results[i]; if (r.isFinal) final += r[0].transcript; else interim += r[0].transcript; }
-        if (interim) ui.transcript(interim, true);
-        if (final.trim()) { fx.label(final.trim(), null); route(final); }
+        if (interim) { ui.transcript(interim, true); window.dispatchEvent(new CustomEvent('handsfree:transcript', { detail: { text: interim, final: false, source: 'mic' } })); }
+        if (final.trim()) { window.dispatchEvent(new CustomEvent('handsfree:transcript', { detail: { text: final.trim(), final: true, source: 'mic' } })); fx.label(final.trim(), null); route(final, 'voice'); }
       };
-      rec.onerror = (e) => { if (e.error === 'not-allowed') { ui.flash('Microphone permission denied', 'err'); stop(); } else if (e.error !== 'no-speech' && e.error !== 'aborted') ui.flash('voice: ' + e.error, 'err'); };
-      rec.onend = () => { if (on) restartT = setTimeout(() => { try { rec.start(); } catch {} }, 250); };
+      const REASON = { 'not-allowed': 'Microphone permission denied — allow the mic for this site', 'service-not-allowed': 'Speech service blocked by the browser', 'audio-capture': 'No microphone found', network: 'Speech recognition needs internet (Chrome sends audio to Google)', 'language-not-supported': `Language ${CFG.lang} not supported` };
+      const voiceEvent = (state, detail) => window.dispatchEvent(new CustomEvent('handsfree:voice', { detail: { state, detail } }));
+      rec.onstart = () => voiceEvent('listening', CFG.lang);
+      rec.onaudiostart = () => voiceEvent('audio', 'microphone open');
+      rec.onspeechstart = () => voiceEvent('speech', 'speech detected');
+      rec.onerror = (e) => { voiceEvent('error', e.error); if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'audio-capture') { ui.flash(REASON[e.error], 'err', 6000); stop(); } else if (e.error !== 'no-speech' && e.error !== 'aborted') ui.flash(REASON[e.error] || 'voice: ' + e.error, 'err', 5000); };
+      rec.onend = () => { voiceEvent('ended', on ? 'restarting' : 'stopped'); if (on) restartT = setTimeout(() => { try { rec.start(); } catch {} }, 250); };
       try { rec.start(); } catch (e) { ui.flash('voice: ' + e.message, 'err'); return false; }
       on = true; ui.setVoice(true); ui.flash(`Listening (${CFG.lang})${CFG.wake ? ` · say "${CFG.wake}" first` : ''}`);
+      meterStart();
       return true;
     }
-    function stop() { on = false; clearTimeout(restartT); try { rec?.stop(); } catch {} ui.setVoice(false); }
-    return { start, stop, toggle: () => (on ? stop() : start()), get on() { return on; }, muteFor: (ms) => { muteUntil = Date.now() + ms; }, supported: !!SR };
+    // microphone level meter: proves audio is being captured even when recognition returns nothing
+    let meterStream = null, meterCtx = null, meterRaf = 0;
+    async function meterStart() {
+      try {
+        meterStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        meterCtx = new (window.AudioContext || window.webkitAudioContext)(); const src = meterCtx.createMediaStreamSource(meterStream); const an = meterCtx.createAnalyser(); an.fftSize = 512; src.connect(an);
+        const buf = new Uint8Array(an.frequencyBinCount);
+        const tick = () => { if (!on) return; an.getByteTimeDomainData(buf); let sum = 0; for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; } ui.level(Math.min(1, Math.sqrt(sum / buf.length) * 4)); meterRaf = requestAnimationFrame(tick); };
+        tick();
+      } catch (e) { ui.flash('Mic level: ' + (e.name === 'NotAllowedError' ? 'permission denied' : e.message), 'err', 5000); }
+    }
+    function meterStop() { cancelAnimationFrame(meterRaf); meterStream?.getTracks().forEach((t) => t.stop()); meterStream = null; try { meterCtx?.close(); } catch {} meterCtx = null; ui.level(0); }
+    function stop() { on = false; clearTimeout(restartT); try { rec?.stop(); } catch {} meterStop(); ui.setVoice(false); }
+    /** Diagnostics: push a transcript through the exact voice path without a microphone. */
+    function feed(text) { window.dispatchEvent(new CustomEvent('handsfree:transcript', { detail: { text, final: true, source: 'feed' } })); ui.transcript(text); return route(text, 'voice'); }
+    function setLang(l) { CFG.lang = l; if (on) { stop(); start(); } ui.flash('Voice language: ' + l); return l; }
+    return { start, stop, toggle: () => (on ? stop() : start()), feed, setLang, get lang() { return CFG.lang; }, get on() { return on; }, muteFor: (ms) => { muteUntil = Date.now() + ms; }, supported: !!SR };
   })();
 
   // ---------------- overlay: translucent particle projection ----------------
@@ -270,7 +323,40 @@
       Object.assign(canvas.style, { position: 'fixed', inset: '0', width: '100%', height: '100%', pointerEvents: 'none', zIndex: 2147482990 });
       document.body.appendChild(canvas); ctx = canvas.getContext('2d'); resize(); addEventListener('resize', resize);
     }
-    function resize() { dpr = Math.min(2, devicePixelRatio || 1); canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
+    let staticLayer = null, staticKey = '';
+    function resize() { dpr = Math.min(CFG.maxDpr || 1.5, devicePixelRatio || 1); canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); staticKey = ''; }
+    /** The grid without the cursor bump changes only with size / which band is hot / which half is active:
+     *  render it once into an offscreen canvas and blit it every frame. */
+    function staticGrid() {
+      const key = [innerWidth, innerHeight, zones?.side, zones?.active, ACCENT(), ZONE()].join('|');
+      if (staticLayer && staticKey === key) return staticLayer;
+      const off = staticLayer || document.createElement('canvas'); off.width = innerWidth * dpr; off.height = innerHeight * dpr;
+      const c = off.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, innerWidth, innerHeight);
+      const A = ACCENT(), Z = ZONE(), zw = innerWidth * CFG.zoneWidth, half = innerHeight / 2, sp = CFG.dotSpacing;
+      for (const side of ['left', 'right']) {
+        const x0 = side === 'left' ? 0 : innerWidth - zw, hot = zones?.side === side;
+        c.fillStyle = rgba(Z, hot ? .16 : .08); c.fillRect(x0, 0, zw, innerHeight);
+        if (zones?.active && hot) { const g = c.createLinearGradient(0, zones.active === 'up' ? 0 : half, 0, zones.active === 'up' ? half : innerHeight); g.addColorStop(0, rgba(Z, zones.active === 'up' ? .28 : 0)); g.addColorStop(1, rgba(Z, zones.active === 'up' ? 0 : .28)); c.fillStyle = g; c.fillRect(x0, zones.active === 'up' ? 0 : half, zw, half); }
+        c.strokeStyle = rgba(Z, hot ? .7 : .35); c.lineWidth = 1.5; c.beginPath(); const ex = side === 'left' ? zw + .5 : x0 - .5; c.moveTo(ex, 0); c.lineTo(ex, innerHeight); c.stroke();
+        c.strokeStyle = rgba(Z, .35); c.setLineDash([3, 7]); c.beginPath(); c.moveTo(x0, half); c.lineTo(x0 + zw, half); c.stroke(); c.setLineDash([]);
+        c.strokeStyle = rgba(Z, hot ? 1 : .6); c.lineWidth = 2.5; c.lineCap = 'round'; c.lineJoin = 'round';
+        const mx = x0 + zw / 2;
+        c.beginPath(); c.moveTo(mx - 10, 34); c.lineTo(mx, 24); c.lineTo(mx + 10, 34); c.stroke();
+        c.beginPath(); c.moveTo(mx - 10, innerHeight - 34); c.lineTo(mx, innerHeight - 24); c.lineTo(mx + 10, innerHeight - 34); c.stroke();
+      }
+      // dots, batched: one path per (colour, alpha, radius) bucket instead of one fill per dot
+      const buckets = new Map();
+      for (let x = sp / 2; x < innerWidth; x += sp) {
+        const inBand = x < zw || x > innerWidth - zw, side = x < zw ? 'left' : 'right', hot = inBand && zones?.side === side;
+        for (let y = sp / 2; y < innerHeight; y += sp) {
+          let r = .9, al = .045, col = A;
+          if (inBand) { const dir = y < half ? 'up' : 'down', rel = ((y % half) / half) * 2 - 1, edge = Math.max(0, dir === 'up' ? -rel : rel); col = Z; r = 1.1 + edge * 1.5; al = .16 + edge * .25 + (hot ? .15 : 0) + (hot && zones.active === dir ? .2 : 0); }
+          const k = col + '|' + al.toFixed(2) + '|' + r.toFixed(1); let b = buckets.get(k); if (!b) { b = { col, al, r, pts: [] }; buckets.set(k, b); } b.pts.push(x, y);
+        }
+      }
+      for (const b of buckets.values()) { c.fillStyle = rgba(b.col, Math.min(.95, b.al)); c.beginPath(); for (let i = 0; i < b.pts.length; i += 2) { c.moveTo(b.pts[i] + b.r, b.pts[i + 1]); c.arc(b.pts[i], b.pts[i + 1], b.r, 0, Math.PI * 2); } c.fill(); }
+      staticLayer = off; staticKey = key; return off;
+    }
     function start() { mount(); on = true; canvas.style.display = 'block'; loop(); }
     function stop() { on = false; cancelAnimationFrame(raf); if (canvas) { ctx.clearRect(0, 0, innerWidth, innerHeight); canvas.style.display = 'none'; } trails.clear(); particles.length = 0; cursor = null; hand = null; }
     function setHand(points, mode) { hand = points; cursorMode = mode; const now = performance.now(); if (!points) return; for (const [k, p] of Object.entries(points)) { const arr = trails.get(k) || []; arr.push({ x: p.x, y: p.y, t: now }); while (arr.length > 14) arr.shift(); trails.set(k, arr); } }
@@ -306,32 +392,21 @@
       const now = performance.now(); const dt = Math.min(48, now - (last || now)) / 1000; last = now;
       ctx.clearRect(0, 0, innerWidth, innerHeight);
       const A = ACCENT();
-      // full-screen raised dot field: fine grey grid everywhere, bulging under the cursor; the two side
-      // bands are tinted teal-green while a hand is tracked (they can be triggered) and glow when active
+      // static grid + zones (cached), then only the dots near the cursor are redrawn with the bump
       if (hand) {
-        const zw = innerWidth * CFG.zoneWidth, half = innerHeight / 2, sp = CFG.dotSpacing, Z = ZONE();
-        const cx = cursor?.x, cy = cursor?.y;
-        for (const side of ['left', 'right']) {
-          const x0 = side === 'left' ? 0 : innerWidth - zw, hot = zones?.side === side;
-          ctx.fillStyle = rgba(Z, hot ? .16 : .08); ctx.fillRect(x0, 0, zw, innerHeight);
-          if (zones?.active && hot) { const g = ctx.createLinearGradient(0, zones.active === 'up' ? 0 : half, 0, zones.active === 'up' ? half : innerHeight); g.addColorStop(0, rgba(Z, zones.active === 'up' ? .28 : 0)); g.addColorStop(1, rgba(Z, zones.active === 'up' ? 0 : .28)); ctx.fillStyle = g; ctx.fillRect(x0, zones.active === 'up' ? 0 : half, zw, half); }
-          ctx.strokeStyle = rgba(Z, hot ? .7 : .35); ctx.lineWidth = 1.5; ctx.beginPath(); const ex = side === 'left' ? zw + .5 : x0 - .5; ctx.moveTo(ex, 0); ctx.lineTo(ex, innerHeight); ctx.stroke();
-          ctx.strokeStyle = rgba(Z, .35); ctx.setLineDash([3, 7]); ctx.beginPath(); ctx.moveTo(x0, half); ctx.lineTo(x0 + zw, half); ctx.stroke(); ctx.setLineDash([]);
-          ctx.strokeStyle = rgba(Z, hot ? 1 : .6); ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-          const mx = x0 + zw / 2;
-          ctx.beginPath(); ctx.moveTo(mx - 10, 34); ctx.lineTo(mx, 24); ctx.lineTo(mx + 10, 34); ctx.stroke();
-          ctx.beginPath(); ctx.moveTo(mx - 10, innerHeight - 34); ctx.lineTo(mx, innerHeight - 24); ctx.lineTo(mx + 10, innerHeight - 34); ctx.stroke();
-        }
-        for (let x = sp / 2; x < innerWidth; x += sp) {
-          const inBand = x < zw || x > innerWidth - zw, side = x < zw ? 'left' : 'right', hot = inBand && zones?.side === side;
-          for (let y = sp / 2; y < innerHeight; y += sp) {
-            let r = .9, al = .045, col = A; // almost invisible until the cursor comes near
-            if (inBand) {
-              const dir = y < half ? 'up' : 'down', rel = ((y % half) / half) * 2 - 1, edge = Math.max(0, dir === 'up' ? -rel : rel);
-              col = Z; r = 1.1 + edge * 1.5; al = .16 + edge * .25 + (hot ? .15 : 0) + (hot && zones.active === dir ? .2 : 0);
+        ctx.drawImage(staticGrid(), 0, 0, innerWidth, innerHeight);
+        if (cursor) {
+          const cx = cursor.x, cy = cursor.y, zw = innerWidth * CFG.zoneWidth, half = innerHeight / 2, sp = CFG.dotSpacing, Z = ZONE(), RAD = 170;
+          const x0 = Math.max(sp / 2, Math.floor((cx - RAD) / sp) * sp + sp / 2), x1 = Math.min(innerWidth, cx + RAD), y0 = Math.max(sp / 2, Math.floor((cy - RAD) / sp) * sp + sp / 2), y1 = Math.min(innerHeight, cy + RAD);
+          for (let x = x0; x <= x1; x += sp) {
+            const inBand = x < zw || x > innerWidth - zw, side = x < zw ? 'left' : 'right', hot = inBand && zones?.side === side;
+            for (let y = y0; y <= y1; y += sp) {
+              const d2 = (x - cx) ** 2 + (y - cy) ** 2; if (d2 > RAD * RAD) continue;
+              let r = .9, al = .045, col = A;
+              if (inBand) { const dir = y < half ? 'up' : 'down', rel = ((y % half) / half) * 2 - 1, edge = Math.max(0, dir === 'up' ? -rel : rel); col = Z; r = 1.1 + edge * 1.5; al = .16 + edge * .25 + (hot ? .15 : 0) + (hot && zones?.active === dir ? .2 : 0); }
+              const bump = Math.exp(-d2 / (2 * 68 * 68)); r += bump * 5.5; al += bump * .7;
+              ctx.fillStyle = rgba(col, Math.min(.95, al)); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
             }
-            if (cx != null) { const d2 = (x - cx) ** 2 + (y - cy) ** 2; if (d2 < 170 * 170) { const bump = Math.exp(-d2 / (2 * 68 * 68)); r += bump * 5.5; al += bump * .7; } }
-            ctx.fillStyle = rgba(col, Math.min(.95, al)); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
           }
         }
       }
@@ -367,21 +442,16 @@
   // lower half scrolls down, faster the further the cursor is from the band's vertical centre. A fist = click
   // on whatever the cursor is over. No swipes: everything is position-based, so it is calm and predictable.
   const gesture = (() => {
-    let on = false, stream, video, landmarker, raf, cursor = null, lastClick = 0, hoverEl = null, lostFrames = 0, lastT = 0, flowT = 0, lastZone = null, wave = [], lastWave = 0, cursorT = 0;
+    let on = false, stream, video, landmarker, raf, cursor = null, lastClick = 0, hoverEl = null, lostFrames = 0, lastT = 0, flowT = 0, lastZone = null, wave = [], lastWave = 0, cursorT = 0, frameNo = 0;
     // tap detector: the index finger, held out alone, bends quickly (extension ratio dips) and straightens again
-    const tap = { armed: true, downAt: 0, anchor: null, hist: [] };
-    function detectTap(ext, now, at) {
-      tap.hist.push({ ext, t: now }); tap.hist = tap.hist.filter((h) => now - h.t <= 160);
-      const peak = Math.max(...tap.hist.map((h) => h.ext));
-      const dipped = ext < CFG.tapBend || peak - ext > CFG.tapDrop;      // absolute bend, or a fast relative drop
-      if (tap.armed && dipped) { tap.armed = false; tap.downAt = now; tap.anchor = at; tap.low = ext; return 'down'; }
-      if (!tap.armed) {
-        tap.low = Math.min(tap.low, ext);
-        const recovered = ext > CFG.tapRelease || ext - tap.low > CFG.tapDrop * 0.8; // straightened again (absolute or relative)
-        if (recovered) { const quick = now - tap.downAt <= CFG.tapMaxMs; tap.armed = true; tap.hist = []; return quick ? 'tap' : 'release'; }
-      }
+    // fist detector: all four fingers folded for a few detections → one click at the position the hand had when it closed
+    const fist = { closed: 0, open: 0, fired: false, anchor: null };
+    function detectFist(isFist, at) {
+      if (isFist) { fist.open = 0; if (++fist.closed === 1) fist.anchor = at; if (fist.closed >= CFG.fistFrames && !fist.fired) { fist.fired = true; return 'click'; } return fist.closed === 1 ? 'down' : null; }
+      if (++fist.open >= CFG.fistOpenFrames) { fist.closed = 0; fist.fired = false; fist.anchor = null; }
       return null;
     }
+    const resetTap = () => { fist.closed = 0; fist.open = 0; fist.fired = false; fist.anchor = null; };
     const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
     const up = (lm, tip, pip, mcp) => dist(lm[tip], lm[0]) > dist(lm[pip], lm[0]) * 1.08 && lm[tip].y < lm[mcp].y;
     let side = 'right'; // which lower corner of the frame the hand is working from
@@ -399,7 +469,7 @@
       } catch (e) { ui.flash('gesture: ' + (e.message || e), 'err'); return false; }
       video = ui.video(); video.srcObject = stream; await video.play();
       on = true; ui.setGesture(true); fx.start(); fx.setZones({ active: null, side: null, strength: 0 });
-      ui.flash('Rest your hand low · point to aim · tap the finger to click · teal bands scroll · wave right = back, left = forward');
+      ui.flash('Rest your hand low · point to aim · fist to click · teal bands scroll · wave right = back, left = forward');
       lastT = performance.now(); loop();
       return true;
     }
@@ -420,22 +490,23 @@
       raf = requestAnimationFrame(loop);
       const now = performance.now(), dt = Math.min(.05, (now - lastT) / 1000); lastT = now;
       if (video.readyState < 2) return;
+      if ((frameNo++ % (CFG.detectEvery || 1)) !== 0) return; // skip frames: the model is the expensive part
       const res = landmarker.detectForVideo(video, now);
       const lm = res?.landmarks?.[0];
-      if (!lm) { if (++lostFrames > 6) { if (cursor) window.dispatchEvent(new CustomEvent('handsfree:handlost')); cursor = null; fx.setHand(null, 'none'); fx.setCursor(null); fx.setZones({ active: null, side: null, strength: 0 }); ui.hand(false); setHover(null); tap.armed = true; tap.hist = []; } return; }
+      if (!lm) { if (++lostFrames > 6) { if (cursor) window.dispatchEvent(new CustomEvent('handsfree:handlost')); cursor = null; fx.setHand(null, 'none'); fx.setCursor(null); fx.setZones({ active: null, side: null, strength: 0 }); ui.hand(false); setHover(null); resetTap(); } return; }
       lostFrames = 0; ui.hand(true);
       const fingers = [up(lm, 8, 6, 5), up(lm, 12, 10, 9), up(lm, 16, 14, 13), up(lm, 20, 18, 17)];
       const nUp = fingers.filter(Boolean).length;
       const size = dist(lm[0], lm[9]) || 0.1;
-      const indexExt = dist(lm[8], lm[5]) / size;                 // ≈1.1 straight, ≈0.6 curled
-      const pointing = !fingers[1] && !fingers[2] && !fingers[3];  // only the index finger is out (bent or straight)
-      const mode = nUp >= 3 ? 'open' : pointing && !tap.armed ? 'tap' : pointing ? 'point' : 'other';
-      const fist = mode === 'tap';
+      const closed = nUp === 0 && dist(lm[8], lm[0]) / size < 1.25;   // all fingers folded and the index tip pulled in: a fist
+      const pointing = fingers[0] && !fingers[1] && !fingers[2] && !fingers[3];
+      const mode = closed ? 'tap' : nUp >= 3 ? 'open' : pointing ? 'point' : 'other';
+      const isFist = closed;
       pickSide(1 - lm[9].x);
       const tips = { thumb: map(lm[4]), index: map(lm[8]), middle: map(lm[12]), ringf: map(lm[16]), pinky: map(lm[20]), palm: map({ x: (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x) / 5, y: (lm[0].y + lm[5].y + lm[9].y + lm[13].y + lm[17].y) / 5 }) };
       fx.setHand(tips, mode);
-      // cursor follows the index tip; during a tap it holds the position the tap started from
-      const target = fist ? (tap.anchor || cursor || tips.index) : tips.index;
+      // cursor follows the index tip; while the hand is closed it holds the position it had when the fist formed
+      const target = isFist ? (fist.anchor || cursor || tips.palm) : tips.index;
       const prev = cursor;
       cursor = cursor ? { x: cursor.x + (target.x - cursor.x) * CFG.cursorSmoothing, y: cursor.y + (target.y - cursor.y) * CFG.cursorSmoothing } : target;
       fx.setCursor(cursor);
@@ -451,7 +522,7 @@
       // scroll zones (not while making a fist, and not while the cursor rests on a horizontal scroller such as a product rail —
       // pages mark those with data-hf-scroll="x" and handle hover-to-scroll themselves)
       const overX = !!document.elementFromPoint(cursor.x, cursor.y)?.closest('[data-hf-scroll="x"]');
-      const z = fist || overX ? { active: null, side: null, strength: 0 } : zoneAt(cursor);
+      const z = isFist || overX ? { active: null, side: null, strength: 0 } : zoneAt(cursor);
       fx.setZones(z);
       if (z.active) {
         const v = CFG.maxScrollSpeed * z.strength * (z.active === 'down' ? 1 : -1);
@@ -460,11 +531,11 @@
         setHover(null);
       } else {
         lastZone = null;
-        if (!fist) setHover(elementAt(cursor));
+        if (!isFist) setHover(elementAt(cursor));
       }
-      // index-finger tap = click (fires on the quick bend-and-straighten; a slow bend is ignored)
-      if (pointing) { const t = detectTap(indexExt, now, cursor); if (t === 'tap' && now - lastClick > CFG.clickCooldownMs) { lastClick = now; click(tap.anchor); } }
-      else { tap.armed = true; tap.hist = []; }
+      // fist = click (a closed hand held for a few detections; open it before the next click)
+      const f = detectFist(isFist, cursor);
+      if (f === 'click' && now - lastClick > CFG.clickCooldownMs) { lastClick = now; click(fist.anchor); }
     }
     async function waveTo(dir) {
       window.dispatchEvent(new CustomEvent('handsfree:gesture', { detail: { gesture: 'wave-' + dir, at: cursor } }));
@@ -476,7 +547,7 @@
     function setHover(el) { if (el === hoverEl) return; hoverEl?.classList.remove('hf-hover'); hoverEl = el; el?.classList.add('hf-hover'); }
     async function click(at) {
       const pos = at || cursor;
-      window.dispatchEvent(new CustomEvent('handsfree:gesture', { detail: { gesture: 'tap-click', at: pos } }));
+      window.dispatchEvent(new CustomEvent('handsfree:gesture', { detail: { gesture: 'fist-click', at: pos } }));
       fx.burst('click', pos);
       const el = elementAt(pos) || hoverEl;
       if (el?.dataset?.pid && focusTool()) {
@@ -494,7 +565,7 @@
       fx.label('open', pos); return viaTool(openTool(), {}, 'open');
     }
     function stop() { on = false; cancelAnimationFrame(raf); stream?.getTracks().forEach((t) => t.stop()); setHover(null); fx.stop(); ui.setGesture(false); ui.hand(false); cursor = null; }
-    const api = { start, stop, toggle: () => (on ? stop() : start()), zoneAt, detectTap, onCursor: null, get on() { return on; } };
+    const api = { start, stop, toggle: () => (on ? stop() : start()), zoneAt, detectFist, onCursor: null, get on() { return on; } };
     return api;
   })();
 
@@ -512,7 +583,7 @@
     const STEPS = [
       { title: 'Point to aim', text: 'Hold up your index finger in front of the camera. A grey ring follows your fingertip across the page; whatever it rests on gets outlined.', diagram: () => svgViewport(null) },
       { title: 'Rest the ring in a side band to scroll', text: 'The left and right edges are scroll bands. Upper half scrolls up, lower half scrolls down — the further from the middle line, the faster. Bring the ring back to the centre to stop.', diagram: () => svgViewport('down') },
-      { title: 'Tap with your index finger to click', text: 'Aim at a product card and tap the air — bend the finger and straighten it quickly, like pressing a button. The card opens in a panel; a tap on any button or link clicks it. Wave your open hand right to go back, left to go forward.', diagram: () => svgHand('point') },
+      { title: 'Make a fist to click', text: 'Aim with your index finger, then close your hand into a fist: the card under the cursor opens in a panel, a fist on any button or link clicks it. Open the hand again before the next click. Wave your open hand right to go back, left to go forward.', diagram: () => svgHand('fist') },
       { title: 'Ready to try', text: 'Hand tracking runs on this device, nothing is uploaded. Your browser will ask for camera permission once. Voice works too — the mic in the dock.', diagram: () => svgHand('point'), final: true },
     ];
     let box, idx = 0;
@@ -559,7 +630,7 @@
       mic: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/></svg>',
     };
     const css = `
-    .hf-dock{position:fixed;z-index:2147483000;display:flex;align-items:center;gap:8px;padding:6px 6px 6px 16px;border-radius:999px;background:var(--ink,#0b0b0c);color:#fff;border:1px solid var(--line-ink,rgba(255,255,255,.12));font:500 13px/1.3 "DM Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;box-shadow:none;${CFG.position.includes('left') ? 'left:20px' : 'right:20px'};${CFG.position.includes('top') ? 'top:20px' : 'bottom:20px'}}
+    .hf-dock{position:fixed;z-index:2147483000;display:flex;position:fixed;align-items:center;gap:8px;padding:6px 6px 6px 16px;border-radius:999px;background:var(--ink,#0b0b0c);color:#fff;border:1px solid var(--line-ink,rgba(255,255,255,.12));font:500 13px/1.3 "DM Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;box-shadow:none;${CFG.position.includes('left') ? 'left:20px' : 'right:20px'};${CFG.position.includes('top') ? 'top:20px' : 'bottom:20px'}}
     .hf-btn{width:40px;height:40px;border-radius:50%;border:1px solid var(--line-ink,rgba(255,255,255,.12));background:transparent;color:#fff;cursor:pointer;display:grid;place-items:center;padding:0;transition:background .2s,color .2s,border-color .2s}
     .hf-btn:hover{border-color:#fff}
     .hf-btn.on{background:var(--mint,#00ffc3);border-color:var(--mint,#00ffc3);color:#000}
@@ -567,6 +638,8 @@
     @keyframes hfp{0%{box-shadow:0 0 0 0 rgba(0,255,195,.45)}70%{box-shadow:0 0 0 9px rgba(0,255,195,0)}100%{box-shadow:0 0 0 0 rgba(0,255,195,0)}}
     .hf-txt{max-width:300px;padding-right:6px;color:rgba(255,255,255,.72);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:"General Sans","DM Sans",sans-serif;font-weight:600;font-size:13px}
     .hf-txt.interim{color:rgba(255,255,255,.45);font-weight:500}.hf-txt.err{color:#ff8a80}.hf-txt.ask{color:var(--mint,#00ffc3)}
+    .hf-level{position:absolute;left:14px;right:14px;bottom:3px;height:2px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden;opacity:0;transition:opacity .2s}
+    .hf-level.on{opacity:1}.hf-level i{display:block;height:100%;width:0;background:var(--mint,#00ffc3);transition:width .08s}
     .hf-cam{width:72px;height:54px;border-radius:14px;object-fit:cover;transform:scaleX(-1);background:#000;display:none;outline:2px solid transparent;outline-offset:-2px;transition:outline-color .2s}
     .hf-cam.show{display:block}.hf-cam.hand{outline-color:var(--mint,#00ffc3)}
     .hf-hover{outline:2px solid var(--mint-deep,#00e0ac)!important;outline-offset:2px}
@@ -578,24 +651,24 @@
       dock = document.createElement('div'); dock.className = 'hf-dock'; dock.setAttribute('aria-label', 'Handsfree controls');
       cam = document.createElement('video'); cam.className = 'hf-cam'; cam.muted = true; cam.playsInline = true;
       txt = document.createElement('span'); txt.className = 'hf-txt'; txt.textContent = 'handsfree';
-      dock.append(cam, txt);
-      if (CFG.gesture) { hand = btn(ICON.hand, 'Hand gestures (camera): point to aim, tap the index finger to click, side bands scroll, wave right = back / left = forward', () => { if (gesture.on) return gesture.stop(); if (!tutorial.done) return tutorial.start(); gesture.start(); }); dock.append(hand); }
+      const lvl = document.createElement('div'); lvl.className = 'hf-level'; lvl.innerHTML = '<i></i>'; dock.append(cam, txt, lvl); dock._lvl = lvl;
+      if (CFG.gesture) { hand = btn(ICON.hand, 'Hand gestures (camera): point to aim, fist to click, side bands scroll, wave right = back / left = forward', () => { if (gesture.on) return gesture.stop(); if (!tutorial.done) return tutorial.start(); gesture.start(); }); dock.append(hand); }
       if (CFG.voice) { mic = btn(ICON.mic, 'Voice control (microphone)', () => voice.toggle()); dock.append(mic); }
       document.body.appendChild(dock);
     }
     const btn = (svg, title, fn) => { const b = document.createElement('button'); b.className = 'hf-btn'; b.type = 'button'; b.title = title; b.setAttribute('aria-label', title); b.innerHTML = svg; b.addEventListener('click', fn); return b; };
     function flash(text, kind = '', ms = 2600) { clearTimeout(flashT); txt.textContent = text; txt.className = 'hf-txt ' + kind; flashT = setTimeout(() => { txt.textContent = voice.on ? 'listening…' : gesture.on ? 'watching…' : 'handsfree'; txt.className = 'hf-txt'; }, ms); }
     function transcript(t, interim = false) { clearTimeout(flashT); txt.textContent = interim ? t : '“' + t + '”'; txt.className = 'hf-txt' + (interim ? ' interim' : ''); }
-    return { mount, flash, transcript, video: () => (cam.classList.add('show'), cam), hand: (b) => cam?.classList.toggle('hand', b), setVoice: (b) => { mic?.classList.toggle('on', b); mic?.classList.toggle('live', b); }, setGesture: (b) => { hand?.classList.toggle('on', b); hand?.classList.toggle('live', b); if (!b) cam.classList.remove('show'); } };
+    return { mount, flash, transcript, level: (v) => { const l = dock?._lvl; if (!l) return; l.classList.toggle('on', v > 0); l.firstChild.style.width = Math.round(v * 100) + '%'; }, video: () => (cam.classList.add('show'), cam), hand: (b) => cam?.classList.toggle('hand', b), setVoice: (b) => { mic?.classList.toggle('on', b); mic?.classList.toggle('live', b); if (!b) dock?._lvl?.classList.remove('on'); }, setGesture: (b) => { hand?.classList.toggle('on', b); hand?.classList.toggle('live', b); if (!b) cam.classList.remove('show'); } };
   })();
 
   // ---------------- boot ----------------
   function boot() {
     ui.mount();
     if (CFG.autostart && CFG.voice) voice.start();
-    console.info(`[handsfree] v0.5.2 ready · tools: ${listTools().map((t) => t.name).join(', ') || '(none yet)'} · voice:${voice.supported} · registry:${registry() ? 'WebMCP' : 'wrapper'}`);
+    console.info(`[handsfree] v0.6.3 ready · tools: ${listTools().map((t) => t.name).join(', ') || '(none yet)'} · voice:${voice.supported} · registry:${registry() ? 'WebMCP' : 'wrapper'}`);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 
-  window.Handsfree = { route, tools: listTools, voice, gesture, fx, tutorial, say, config: CFG, version: '0.5.2' };
+  window.Handsfree = { route, tools: listTools, voice, gesture, fx, tutorial, say, config: CFG, version: '0.6.3' };
 })();
