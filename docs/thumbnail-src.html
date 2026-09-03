@@ -1,0 +1,55 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link href="https://api.fontshare.com/v2/css?f[]=general-sans@500,600,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Geist+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0b0b0c;--paper:#fff;--cloud:#f4f4f1;--mint:#00ffc3;--mint-deep:#00e0ac;--muted:rgba(255,255,255,.62)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{width:1800px;height:1200px;background:var(--ink);color:#fff;font-family:"DM Sans",sans-serif;overflow:hidden;position:relative}
+.grid{position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.10) 1.2px,transparent 1.3px);background-size:22px 22px;opacity:.9}
+.band{position:absolute;top:0;bottom:0;width:150px;background:rgba(0,224,172,.10);border-right:1.5px solid rgba(0,224,172,.5)}
+.band.r{right:0;left:auto;border-right:0;border-left:1.5px solid rgba(0,224,172,.5)}
+.band i{position:absolute;left:50%;width:22px;height:22px;border-left:3px solid rgba(0,224,172,.95);border-top:3px solid rgba(0,224,172,.95);transform:translateX(-50%) rotate(45deg)}
+.band i.d{transform:translateX(-50%) rotate(225deg)}
+.band .mid{position:absolute;left:0;right:0;top:50%;border-top:1px dashed rgba(0,224,172,.5)}
+.left{position:absolute;left:200px;top:150px;width:640px}
+.eyebrow{display:inline-flex;align-items:center;gap:10px;font-family:"General Sans";font-weight:600;font-size:20px;padding:9px 20px 9px 9px;border:1px solid rgba(255,255,255,.18);border-radius:999px}
+.eyebrow .dot{width:26px;height:26px;border-radius:50%;background:var(--mint);display:grid;place-items:center}
+.eyebrow .dot svg{width:13px;height:13px;fill:var(--ink)}
+h1{font-family:"General Sans";font-weight:700;font-size:108px;letter-spacing:-.05em;line-height:.92;margin:34px 0 26px}
+h1 span{color:var(--mint)}
+.lede{font-size:27px;line-height:1.3;color:var(--muted);max-width:560px}
+.code{margin-top:40px;display:inline-block;white-space:nowrap;font-family:"Geist Mono",monospace;font-size:19px;padding:16px 22px;border-radius:14px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14)}
+.code b{color:var(--mint);font-weight:500}
+.chips{display:flex;gap:10px;margin-top:34px;flex-wrap:wrap}
+.chip{font-family:"General Sans";font-weight:600;font-size:19px;padding:10px 18px;border-radius:999px;border:1px solid rgba(255,255,255,.2)}
+.chip.m{background:var(--mint);color:#000;border-color:var(--mint)}
+.shot{position:absolute;right:110px;top:330px;width:740px;height:514px;border-radius:26px;overflow:hidden;background:#fff;transform:rotate(-2.5deg);outline:8px solid rgba(255,255,255,.08)}
+.shot img{width:100%;display:block}
+.cursor{position:absolute;right:520px;top:600px;width:56px;height:56px;border-radius:50%;border:5px solid #fff;box-shadow:0 0 0 6px rgba(11,11,12,.55),0 0 60px 30px rgba(0,224,172,.35)}
+.cursor::after{content:"";position:absolute;inset:50%;width:10px;height:10px;margin:-5px;border-radius:50%;background:#fff}
+.bump{position:absolute;right:390px;top:470px;width:320px;height:320px;border-radius:50%;background:radial-gradient(rgba(0,224,172,.28),rgba(0,224,172,0) 65%)}
+.label{position:absolute;right:430px;top:552px;font-family:"General Sans";font-weight:600;font-size:18px;background:rgba(11,11,12,.85);color:#fff;padding:8px 16px;border-radius:999px;border:1px solid rgba(255,255,255,.2)}
+.dock{position:absolute;right:230px;bottom:72px;display:flex;align-items:center;gap:10px;padding:8px 8px 8px 22px;border-radius:999px;background:rgba(11,11,12,.9);border:1px solid rgba(255,255,255,.16);font-family:"General Sans";font-weight:600;font-size:20px}
+.dock .b{width:52px;height:52px;border-radius:50%;border:1px solid rgba(255,255,255,.18);display:grid;place-items:center}
+.dock .b.on{background:var(--mint);color:#000;border-color:var(--mint)}
+.dock svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.foot{position:absolute;left:210px;bottom:76px;color:var(--muted);font-size:21px;display:flex;align-items:center;gap:14px}
+.foot .wm{height:26px;width:auto;fill:#fff}
+</style></head><body>
+<div class="grid"></div>
+<div class="band"><i style="top:30px"></i><span class="mid"></span><i class="d" style="bottom:30px"></i></div>
+<div class="band r"><i style="top:30px"></i><span class="mid"></span><i class="d" style="bottom:30px"></i></div>
+<div class="left">
+  <span class="eyebrow"><span class="dot"><svg viewBox="0 0 953 906"><path d="M476.5 307.525C437.836 307.525 406.718 316.937 383.333 335.635C359.885 354.396 342.86 379.015 332.321 409.431C321.782 439.91 316.482 473.878 316.482 511.337V749.18C316.482 835.255 246.7 905 160.579 905H0V472.694C0 385.996 16.9622 306.902 51.0113 235.474C84.998 164.047 137.194 106.892 207.475 64.1353C277.818 21.3784 367.493 0 476.5 0C585.507 0 675.182 21.3784 745.525 64.1353C815.868 106.892 868.002 164.047 901.989 235.474C935.975 306.965 953 386.059 953 472.694V905H792.421C706.3 905 636.518 835.255 636.518 749.18V511.337C636.518 473.878 631.217 439.91 620.678 409.431C610.139 378.953 593.115 354.396 569.667 335.635C546.219 316.937 515.164 307.525 476.5 307.525Z"/></svg></span>WebMCP challenge</span>
+  <h1>Handsfree<span>.</span></h1>
+  <p class="lede">One line of WebMCP for voice &amp; gesture. Your site's existing frontend becomes tools; the tools become things people can say and point at.</p>
+  <div class="code">&lt;script src="<b>/handsfree.js</b>" defer&gt;&lt;/script&gt;</div>
+  <div class="chips"><span class="chip m">Claude Code plugin</span><span class="chip">document.modelContext</span><span class="chip">no LLM in the loop</span></div>
+</div>
+<div class="shot"><img src="shot-live2.png" alt=""></div>
+<div class="bump"></div>
+<div class="cursor"></div>
+<div class="label">open</div>
+<div class="dock">handsfree<span class="b on"><svg viewBox="0 0 24 24"><path d="M8 12.5V5.6a1.6 1.6 0 0 1 3.2 0V11M11.2 11V4.1a1.6 1.6 0 0 1 3.2 0V11M14.4 11V5.6a1.6 1.6 0 0 1 3.2 0V12M17.6 12V8.6a1.6 1.6 0 0 1 3.2 0V15a6.5 6.5 0 0 1-6.5 6.5h-1.6a6.5 6.5 0 0 1-5.4-2.9L4 13.9a1.7 1.7 0 0 1 2.7-2L8 13.4"/></svg></span><span class="b"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/></svg></span></div>
+<div class="foot">Demo built on the Nohi agentic catalog &nbsp;·&nbsp; webmcp-shop-demo.vercel.app</div>
+</body></html>

@@ -1,5 +1,7 @@
 # Handsfree — one line of WebMCP for voice & gesture
 
+![Handsfree](docs/handsfree-thumbnail.png)
+
 **Give any website you can edit voice commands and hand-gesture control, with one command to your Claude Code and one `<script>` line in the page.**
 
 WebMCP (the W3C Web Machine Learning draft, `document.modelContext`) lets a page expose what it can do as *tools* — named functions with a description and a JSON schema. Handsfree is the other half: an input layer that reads those tools and drives them from speech and from a camera, with no LLM in the loop.
