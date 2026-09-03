@@ -1,0 +1,20 @@
+{
+  "name": "handsfree",
+  "displayName": "Handsfree",
+  "version": "0.5.1",
+  "description": "One line for your Claude Code: make a site voice + gesture controllable. The skill audits the codebase, registers the page's capabilities as WebMCP tools (document.modelContext.registerTool), then injects handsfree.js — a runtime that routes Web Speech transcripts and MediaPipe hand gestures (index finger as a projected cursor, fist to click, left/right side bands that scroll up or down faster towards the edges, all drawn as a translucent grey particle overlay) to those tools with no LLM in the loop. Say \"handsfree\" or \"make this site voice/gesture controlled\" to start.",
+  "author": {
+    "name": "NILE",
+    "url": "https://nile.app"
+  },
+  "homepage": "https://nile.app",
+  "license": "UNLICENSED",
+  "keywords": [
+    "webmcp",
+    "voice",
+    "gesture",
+    "modelContext",
+    "accessibility"
+  ],
+  "skills": "./skills"
+}

@@ -1,0 +1,31 @@
+{
+  "name": "handsfree",
+  "owner": {
+    "name": "NILE",
+    "url": "https://nile.app"
+  },
+  "description": "Handsfree — one line for your Claude Code: turn any site whose codebase you can edit into a voice + gesture controlled page, on top of WebMCP tools.",
+  "plugins": [
+    {
+      "name": "handsfree",
+      "source": "./plugins/handsfree",
+      "description": "One line for your Claude Code: the skill audits a site's existing frontend, registers its real capabilities as WebMCP tools (document.modelContext.registerTool), then injects handsfree.js — an LLM-free runtime that turns those tools into voice commands (Web Speech) and hand gestures (MediaPipe: index-finger cursor, air-tap to click, teal side bands to scroll, wave to go back/forward). Includes the injector CLI, the runtime, an interactive tutorial and a tool-authoring reference.",
+      "version": "0.5.1",
+      "author": {
+        "name": "NILE"
+      },
+      "homepage": "https://nile.app",
+      "license": "UNLICENSED",
+      "category": "web",
+      "keywords": [
+        "webmcp",
+        "voice",
+        "gesture",
+        "accessibility",
+        "agentic-web",
+        "modelContext"
+      ],
+      "strict": true
+    }
+  ]
+}
